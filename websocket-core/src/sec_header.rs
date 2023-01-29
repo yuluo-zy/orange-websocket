@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::str::FromStr;
 use base64::Engine;
 use base64::engine::general_purpose;
-use sha1::{Digest, Sha1};
+use sha1::{Sha1, Digest};
 use crate::error::WebSocketError;
 use crate::result::WebSocketResult;
 

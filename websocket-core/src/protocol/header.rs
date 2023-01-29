@@ -1,7 +1,5 @@
-use std::fmt;
 use std::fmt::Debug;
 use std::io::{Read, Write};
-use std::str::FromStr;
 use bitflags::bitflags;
 use crate::codec::order_byte::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use crate::error::WebSocketError;

@@ -1,14 +1,15 @@
 
-use crate::dataframe::Opcode;
-use crate::result::{WebSocketError, WebSocketResult};
 use std::borrow::Cow;
 use std::io;
 use std::io::Write;
 use std::str::from_utf8;
 use crate::codec::order_byte::{NetworkEndian, ReadBytesExt, WriteBytesExt};
+use crate::error::WebSocketError;
 use crate::protocol;
 use crate::protocol::dataframe::DataFrame;
+use crate::protocol::header::Opcode;
 use crate::protocol::message::Type;
+use crate::result::WebSocketResult;
 use crate::utils::bytes_to_string;
 
 const FALSE_RESERVED_BITS: &[bool; 3] = &[false; 3];
@@ -132,7 +133,7 @@ impl<'a> protocol::dataframe::DataFrame for Message<'a> {
 		self.payload.len() + if self.cd_status_code.is_some() { 2 } else { 0 }
 	}
 
-	fn write_payload(&self, socket: &mut dyn Write) -> WebSocketResult<()> {
+	fn write_payload(&self, socket: &mut impl Write) -> WebSocketResult<()> {
 		if let Some(reason) = self.cd_status_code {
 			socket.write_u16::<NetworkEndian>(reason)?;
 		}
@@ -155,7 +156,7 @@ impl<'a> protocol::dataframe::DataFrame for Message<'a> {
 
 impl<'a> protocol::message::Message for Message<'a> {
 	/// Attempt to form a message from a series of data frames
-	fn serialize(&self, writer: &mut dyn Write, masked: bool) -> WebSocketResult<()> {
+	fn serialize(&self, writer: &mut impl Write, masked: bool) -> WebSocketResult<()> {
 		self.write_to(writer, masked)
 	}
 
@@ -167,7 +168,7 @@ impl<'a> protocol::message::Message for Message<'a> {
 	/// Attempt to form a message from a series of data frames
 	fn from_dataframes<D>(frames: Vec<D>) -> WebSocketResult<Self>
 	where
-		D: DataFrameTrait,
+		D: DataFrame,
 	{
 		let opcode = frames
 			.first()
