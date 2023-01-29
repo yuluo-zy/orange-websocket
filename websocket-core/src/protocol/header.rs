@@ -1,8 +1,12 @@
+use std::fmt;
+use std::fmt::Debug;
 use std::io::{Read, Write};
+use std::str::FromStr;
 use bitflags::bitflags;
 use crate::codec::order_byte::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use crate::error::WebSocketError;
 use crate::result::WebSocketResult;
+
 
 bitflags! {
 	/// Flags relevant to a WebSocket data frame.
@@ -110,9 +114,7 @@ impl FrameHeader for DataFrameHeader {
             // Write the 'MASK'
             if self.mask.is_some() { 0x80 } else { 0x00 } |
                 // Write the 'Payload len'
-                if self.len <= 125 { self.len as u8 }
-                else if self.len <= 65535 { 126 }
-                else { 127 },
+                if self.len <= 125 { self.len as u8 } else if self.len <= 65535 { 126 } else { 127 },
         )?;
 
         // Write 'Extended payload length'
@@ -131,34 +133,34 @@ impl FrameHeader for DataFrameHeader {
     }
 }
 
-pub struct DataMasker<'w, T> where T : Write{
+pub struct DataMasker<'w, T> where T: 'w + Write {
     key: [u8; 4],
     pos: usize,
-    endpoint: &'w mut T
+    endpoint: &'w mut T,
 }
 
-impl<'w, T> DataMasker<'w, T> where T: Write {
+impl<'w, T> DataMasker<'w, T> where T: 'w + Write {
     pub fn new(key: [u8; 4], endpoint: &'w mut T) -> Self {
         Self {
             key,
             pos: 0,
-            endpoint
+            endpoint,
         }
     }
 }
 
-impl<'w, T> Write for DataMasker<'w, T> where T: Write {
+impl<'w, T> Write for DataMasker<'w, T> where T: 'w + Write {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            let mut data = Vec::with_capacity(buf.len());
-            for &byte in buf.iter() {
-                data.push(byte ^ self.key[self.pos]);
-                self.pos = (self.pos + 1) % self.key.len();
-            }
-            self.endpoint.write(&data)
+        let mut data = Vec::with_capacity(buf.len());
+        for &byte in buf.iter() {
+            data.push(byte ^ self.key[self.pos]);
+            self.pos = (self.pos + 1) % self.key.len();
+        }
+        self.endpoint.write(&data)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-       self.endpoint.flush()
+        self.endpoint.flush()
     }
 }
 
@@ -173,4 +175,69 @@ pub fn mask_data(mask: [u8; 4], data: &[u8]) -> Vec<u8> {
         out.push(buf_item ^ key_item);
     }
     out
+}
+
+/// Represents a WebSocket data frame opcode
+#[derive(Clone, Debug, Copy, PartialEq)]
+pub enum Opcode {
+    /// A continuation data frame
+    Continuation,
+    /// A UTF-8 text data frame
+    Text,
+    /// A binary data frame
+    Binary,
+    /// An undefined non-control data frame
+    NonControl1,
+    /// An undefined non-control data frame
+    NonControl2,
+    /// An undefined non-control data frame
+    NonControl3,
+    /// An undefined non-control data frame
+    NonControl4,
+    /// An undefined non-control data frame
+    NonControl5,
+    /// A close data frame
+    Close,
+    /// A ping data frame
+    Ping,
+    /// A pong data frame
+    Pong,
+    /// An undefined control data frame
+    Control1,
+    /// An undefined control data frame
+    Control2,
+    /// An undefined control data frame
+    Control3,
+    /// An undefined control data frame
+    Control4,
+    /// An undefined control data frame
+    Control5,
+}
+
+impl Opcode {
+    /// Attempts to form an Opcode from a nibble.
+    ///
+    /// Returns the Opcode, or None if the opcode is out of range.
+    #[warn(clippy::new_ret_no_self)]
+    pub fn new(op: u8) -> Option<Opcode> {
+        Some(match op {
+            0 => Opcode::Continuation,
+            1 => Opcode::Text,
+            2 => Opcode::Binary,
+            3 => Opcode::NonControl1,
+            4 => Opcode::NonControl2,
+            5 => Opcode::NonControl3,
+            6 => Opcode::NonControl4,
+            7 => Opcode::NonControl5,
+            8 => Opcode::Close,
+            9 => Opcode::Ping,
+            10 => Opcode::Pong,
+            11 => Opcode::Control1,
+            12 => Opcode::Control2,
+            13 => Opcode::Control3,
+            14 => Opcode::Control4,
+            15 => Opcode::Control5,
+            _ => return None,
+        })
+    }
 }
