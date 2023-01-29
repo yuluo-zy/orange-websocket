@@ -1,4 +1,5 @@
 use std::io::Write;
+use crate::protocol::header::{DataFrameFlags, DataFrameHeader, DataMasker, FrameHeader, gen_mask};
 use crate::result::WebSocketResult;
 
 // 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -29,104 +30,8 @@ use crate::result::WebSocketResult;
 // Application data: y bytes
 // ​	任意的“应用数据”，占用“扩展数据”后面的剩余所有字段。“应用数据”的长度等于有效负载长度减去“扩展应用”长度。
 // 基础数据帧协议通过ABNF进行了正式的定义。需要重点知道的是，这些数据都是二进制的，而不是ASCII字符。例如，长度为1 bit的字段的值为%x0 / %x1代表的是一个值为0/1的单独的bit，而不是一整个字节（8 bit）来代表ASCII编码的字符“0”和“1”。一个长度为4 bit的范围是%x0-F的字段值代表的是4个bit，而不是字节（8 bit）对应的ASCII码的值。不要指定字符编码：“规则解析为一组最终的值，有时候是字符。在ABNF中，字符仅仅是一个非负的数字。在特定的上下文中，会根据特定的值的映射（编码）编码集（例如ASCII）”。在这里，指定的编码类型是将每个字段编码为特定的bits数组的二进制编码的最终数据。
-// ws-frame =
-//
-// frame-fin; 长度为1 bit
-// frame-rsv1; 长度为1 bit
-// frame-rsv2; 长度为1 bit
-// frame-rsv3; 长度为1 bit
-// frame-opcode; 长度为4 bit
-// frame-masked; 长度为1 bit
-// frame-payload-length; 长度为7或者7+16或者7+64 bit
-// [frame-masking-key]; 长度为32 bit
-// frame-payload-data; 长度为大于0的n*8 bit（其中n>0）
-//
-// frame-fin =
-//
-// %x0，除了以下为1的情况
-// %x1，最后一个消息帧
-// 长度为1 bit
-//
-// frame-rsv1 =
-//
-// %x0 / %x1，长度为1 bit，如果没有协商则必须为0
-//
-// frame-rsv2 =
-//
-// %x0 / %x1，长度为1 bit，如果没有协商则必须为0
-//
-// frame-rsv3 =
-//
-// %x0 / %x1，长度为1 bit，如果没有协商则必须为0
-//
-// frame-opcode =
-//
-// frame-opcode-non-control
-// frame-opcode-control
-// frame-opcode-cont
-//
-// frame-opcode-non-control
-//
-// %x1，文本帧
-// %x2，二进制帧
-// %x3-7，保留给将来的非控制帧
-// 长度为4 bit
-//
-// frame-opcode-control
-//
-// %x8，连接关闭
-// %x9，ping帧
-// %xA，pong帧
-// %xB-F，保留给将来的控制帧
-// 长度为4 bit
-//
-// frame-masked
-//
-// %x0，不添加掩码，没有frame-masking-key
-// %x1，添加掩码，存在frame-masking-key
-// 长度为1 bit
-//
-// frame-payload-length
-//
-// %x00-7D，长度为7 bit
-// %x7E frame-payload-length-16，长度为7+16 bit
-// %x7F frame-payload-length-63，长度为7+64 bit
-//
-// frame-payload-length-16
-//
-// %x0000-FFFF，长度为16 bit
-//
-// frame-payload-length-63
-//
-// %x0000000000000000-7FFFFFFFFFFFFFFF，长度为64 bit
-//
-// frame-masking-key
-//
-// 4(%x00-FF)，当frame-mask为1时存在，长度为32 bit
-//
-// frame-payload-data
-//
-// frame-masked-extension-data frame-masked-application-data，当frame-masked为1时
-// frame-unmasked-extension-data frame-unmasked-application-data，当frame-masked为0时
-//
-// frame-masked-extension-data
-//
-// *(%x00-FF)，保留给将来的扩展，长度为n*8，其中n>0
-//
-// frame-masked-application-data
-//
-// *(%x00-FF)，长度为n*8，其中n>0
-//
-// frame-unmasked-extension-data
-//
-// *(%x00-FF)，保留给将来的扩展，长度为n*8，其中n>0
-//
-// frame-unmasked-application-data
-//
-// *(%x00-FF)，长度为n*8，其中n>0
 
 pub trait DataFrame {
-
     /// FIN: 1 bit 表示这是消息的最后一个片段。第一个片段也有可能是最后一个片段。
     fn is_last(&self) -> bool;
 
@@ -178,27 +83,27 @@ pub trait DataFrame {
     fn take_payload(self) -> Vec<u8>;
 
     /// Writes a DataFrame to a Writer.
-    fn write_to(&self, writer: &mut dyn Write, mask: bool) -> WebSocketResult<()> {
-        let mut flags = dfh::DataFrameFlags::empty();
+    fn write_to(&self, writer: &mut impl Write, mask: bool) -> WebSocketResult<()> {
+        let mut flags = DataFrameFlags::empty();
         if self.is_last() {
-            flags.insert(dfh::DataFrameFlags::FIN);
-        }
-        {
-            let reserved = self.reserved();
-            if reserved[0] {
-                flags.insert(dfh::DataFrameFlags::RSV1);
-            }
-            if reserved[1] {
-                flags.insert(dfh::DataFrameFlags::RSV2);
-            }
-            if reserved[2] {
-                flags.insert(dfh::DataFrameFlags::RSV3);
-            }
+            flags.insert(DataFrameFlags::FIN);
         }
 
-        let masking_key = if mask { Some(mask::gen_mask()) } else { None };
+        let reserved = self.reserved();
+        if reserved[0] {
+            flags.insert(DataFrameFlags::RSV1);
+        }
+        if reserved[1] {
+            flags.insert(DataFrameFlags::RSV2);
+        }
+        if reserved[2] {
+            flags.insert(DataFrameFlags::RSV3);
+        }
 
-        let header = dfh::DataFrameHeader {
+
+        let masking_key = if mask { Some(gen_mask()) } else { None };
+
+        let header = DataFrameHeader {
             flags,
             opcode: self.opcode() as u8,
             mask: masking_key,
@@ -206,11 +111,11 @@ pub trait DataFrame {
         };
 
         let mut data = Vec::<u8>::new();
-        dfh::write_header(&mut data, header)?;
+        header.write(&mut data)?;
 
         match masking_key {
             Some(mask) => {
-                let mut masker = Masker::new(mask, &mut data);
+                let mut masker = DataMasker::new(mask,&mut data);
                 self.write_payload(&mut masker)?
             }
             None => self.write_payload(&mut data)?,

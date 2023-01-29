@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use bitflags::bitflags;
-use crate::codec::order_byte::{NetworkEndian, ReadBytesExt};
+use crate::codec::order_byte::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use crate::error::WebSocketError;
 use crate::result::WebSocketResult;
 
@@ -19,8 +19,8 @@ bitflags! {
 }
 
 pub trait FrameHeader: Sized {
-    fn read(reader: &mut dyn Read) -> WebSocketResult<Self>;
-    fn write(self, writer: &mut dyn Write) -> WebSocketResult<()>;
+    fn read(reader: &mut impl Read) -> WebSocketResult<Self>;
+    fn write(self, writer: &mut impl Write) -> WebSocketResult<()>;
 }
 
 pub struct DataFrameHeader {
@@ -94,6 +94,83 @@ impl FrameHeader for DataFrameHeader {
     }
 
     fn write(self, writer: &mut impl Write) -> WebSocketResult<()> {
+        if self.opcode > 0xF {
+            return Err(WebSocketError::DataFrameError("Invalid data frame opcode"));
+        }
+        if self.opcode >= 8 && self.len >= 126 {
+            return Err(WebSocketError::DataFrameError(
+                "Control frame length too long",
+            ));
+        }
+
+        // Write 'FIN', 'RSV1', 'RSV2', 'RSV3' and 'opcode'
+        writer.write_u8((self.flags.bits) | self.opcode)?;
+
+        writer.write_u8(
+            // Write the 'MASK'
+            if self.mask.is_some() { 0x80 } else { 0x00 } |
+                // Write the 'Payload len'
+                if self.len <= 125 { self.len as u8 }
+                else if self.len <= 65535 { 126 }
+                else { 127 },
+        )?;
+
+        // Write 'Extended payload length'
+        if self.len >= 126 && self.len <= 65535 {
+            writer.write_u16::<NetworkEndian>(self.len as u16)?;
+        } else if self.len > 65535 {
+            writer.write_u64::<NetworkEndian>(self.len)?;
+        }
+
+        // Write 'Masking-key'
+        if let Some(mask) = self.mask {
+            writer.write_all(&mask)?
+        }
+
         Ok(())
     }
+}
+
+pub struct DataMasker<'w, T> where T : Write{
+    key: [u8; 4],
+    pos: usize,
+    endpoint: &'w mut T
+}
+
+impl<'w, T> DataMasker<'w, T> where T: Write {
+    pub fn new(key: [u8; 4], endpoint: &'w mut T) -> Self {
+        Self {
+            key,
+            pos: 0,
+            endpoint
+        }
+    }
+}
+
+impl<'w, T> Write for DataMasker<'w, T> where T: Write {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let mut data = Vec::with_capacity(buf.len());
+            for &byte in buf.iter() {
+                data.push(byte ^ self.key[self.pos]);
+                self.pos = (self.pos + 1) % self.key.len();
+            }
+            self.endpoint.write(&data)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+       self.endpoint.flush()
+    }
+}
+
+pub fn gen_mask() -> [u8; 4] {
+    rand::random()
+}
+
+pub fn mask_data(mask: [u8; 4], data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    let zip_iter = data.iter().zip(mask.iter().cycle());
+    for (&buf_item, &key_item) in zip_iter {
+        out.push(buf_item ^ key_item);
+    }
+    out
 }
