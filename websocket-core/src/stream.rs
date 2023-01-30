@@ -1,6 +1,7 @@
 
 use std::fmt::Arguments;
 use std::io::{self, Read, Write};
+use std::net::TcpStream;
 
 pub trait Stream: Read + Write {}
 impl<S> Stream for S where S: Read + Write {}
@@ -53,6 +54,16 @@ where
 	#[inline(always)]
 	fn write_fmt(&mut self, fmt: Arguments) -> io::Result<()> {
 		self.1.write_fmt(fmt)
+	}
+}
+
+pub trait AsTcpStream {
+	fn as_tcp(&self) -> &TcpStream;
+}
+
+impl AsTcpStream for TcpStream {
+	fn as_tcp(&self) -> &TcpStream {
+		self
 	}
 }
 

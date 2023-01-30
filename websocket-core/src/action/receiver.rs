@@ -4,7 +4,7 @@ use crate::protocol::message::Message;
 use crate::result::WebSocketResult;
 
 /// A trait for receiving data frames and messages.
-pub trait Receiver: Sized {
+pub trait Receiver: Sized   {
     /// The type of dataframe that incoming messages will be serialized to.
     type F: DataFrame;
 

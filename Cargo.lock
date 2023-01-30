@@ -983,7 +983,6 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "bitflags",
- "bytes",
  "criterion",
  "rand",
  "sha1",
@@ -995,6 +994,7 @@ name = "websocket-server"
 version = "0.1.0"
 dependencies = [
  "hyper",
+ "thiserror",
  "tokio",
  "websocket-core",
 ]
