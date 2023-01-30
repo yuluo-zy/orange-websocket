@@ -113,7 +113,7 @@ impl<'a> Message<'a> {
 	}
 }
 
-impl<'a> protocol::dataframe::DataFrame for Message<'a> {
+impl<'a> DataFrame for Message<'a> {
 	#[inline(always)]
 	fn is_last(&self) -> bool {
 		true
